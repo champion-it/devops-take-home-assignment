@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devops-demo-prod-shared
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: devops-demo
+  source:
+    repoURL: http://gitlab.dwl.internal/infrastructure/gitops/kustomize-demo.git
+    targetRevision: main
+    path: overlays/prod/shared
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devops-demo
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m

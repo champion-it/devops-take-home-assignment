@@ -1,0 +1,139 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared GitLab CI template for Terraform (infrastructure/terraform/**)
+#
+# Included by:
+#   infrastructure/terraform/.gitlab-ci.yml
+#
+# Branch / event mapping
+#   MR (any → dev|main)   : fmt + validate + plan (both envs)  — no apply
+#   push to dev           : apply STAGING        (automatic)
+#   push to main          : apply PRODUCTION     (MANUAL gate — must click run)
+#
+# Required CI/CD variables (Settings → CI/CD → Variables, masked + protected)
+#   HW_ACCESS_KEY       Huawei Cloud access key
+#   HW_SECRET_KEY       Huawei Cloud secret key
+#   AWS_ACCESS_KEY_ID       = same as HW_ACCESS_KEY (for OBS S3 backend)
+#   AWS_SECRET_ACCESS_KEY   = same as HW_SECRET_KEY
+# ─────────────────────────────────────────────────────────────────────────────
+
+variables:
+  TF_VERSION: "1.9"
+  TF_ROOT: "$CI_PROJECT_DIR/infrastructure/terraform"
+  TF_IN_AUTOMATION: "true"
+  HW_REGION: ap-southeast-2
+
+stages:
+  - validate
+  - plan
+  - apply
+
+# ─── Reusable base for all terraform jobs ───────────────────────────────────
+.tf_base:
+  image:
+    name: hashicorp/terraform:$TF_VERSION
+    entrypoint: [""]
+  tags:
+    - terraform
+  before_script:
+    - export HW_ACCESS_KEY="$HW_ACCESS_KEY"
+    - export HW_SECRET_KEY="$HW_SECRET_KEY"
+    - export AWS_ACCESS_KEY_ID="$HW_ACCESS_KEY"
+    - export AWS_SECRET_ACCESS_KEY="$HW_SECRET_KEY"
+    - cd "$TF_ROOT/envs/$TF_ENV"
+    - terraform --version
+    - terraform init -input=false
+
+# ─── 1. fmt + validate (runs on every MR and push) ──────────────────────────
+fmt-validate:
+  stage: validate
+  image:
+    name: hashicorp/terraform:$TF_VERSION
+    entrypoint: [""]
+  tags:
+    - terraform
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - cd "$TF_ROOT"
+    - terraform fmt -check -recursive
+    - |
+      for env in staging production; do
+        echo "── validate $env ──"
+        cd "$TF_ROOT/envs/$env"
+        terraform init -backend=false -input=false
+        terraform validate
+        cd "$TF_ROOT"
+      done
+
+# ─── 2. plan (MR + branch pushes) ───────────────────────────────────────────
+plan:staging:
+  extends: .tf_base
+  stage: plan
+  variables:
+    TF_ENV: staging
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+  script:
+    - terraform plan -input=false -out=tfplan -no-color | tee plan.txt
+  artifacts:
+    name: "plan-staging-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - infrastructure/terraform/envs/staging/tfplan
+      - infrastructure/terraform/envs/staging/plan.txt
+    expire_in: 1 week
+    when: always
+
+plan:production:
+  extends: .tf_base
+  stage: plan
+  variables:
+    TF_ENV: production
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - terraform plan -input=false -out=tfplan -no-color | tee plan.txt
+  artifacts:
+    name: "plan-production-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - infrastructure/terraform/envs/production/tfplan
+      - infrastructure/terraform/envs/production/plan.txt
+    expire_in: 1 week
+    when: always
+
+# ─── 3. apply ───────────────────────────────────────────────────────────────
+apply:staging:
+  extends: .tf_base
+  stage: apply
+  environment:
+    name: staging
+  variables:
+    TF_ENV: staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+      when: on_success           # AUTO apply when dev merge succeeds
+  needs:
+    - job: plan:staging
+      artifacts: true
+  script:
+    - terraform apply -input=false -auto-approve tfplan
+
+apply:production:
+  extends: .tf_base
+  stage: apply
+  environment:
+    name: production
+  variables:
+    TF_ENV: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual               # ⬅ MANUAL gate — must be triggered by hand
+      allow_failure: false
+  needs:
+    - job: plan:production
+      artifacts: true
+  script:
+    - terraform apply -input=false -auto-approve tfplan

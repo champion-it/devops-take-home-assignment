@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: devops-demo
+
+labels:
+  - includeSelectors: false
+    pairs:
+      env: dev
+      part-of: devops-takehome
+
+resources:
+  - ../../../base/shared

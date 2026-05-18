@@ -1,0 +1,39 @@
+{{- range $name, $r := .Values.routes }}
+{{- if $r.enabled }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}
+  namespace: {{ $r.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: tools-routes
+spec:
+  parentRefs:
+    {{- $sectionNames := $r.sectionNames | default $.Values.gateway.sectionNames | default (list $.Values.gateway.sectionName) }}
+    {{- range $sectionNames }}
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $.Values.gateway.name }}
+      namespace: {{ $.Values.gateway.namespace }}
+      sectionName: {{ . }}
+    {{- end }}
+  hostnames:
+    - {{ $r.hostname }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ $r.backend.service }}
+          port: {{ $r.backend.port }}
+          weight: 1
+      timeouts:
+        request: 3600s
+        backendRequest: 3600s
+{{- end }}
+{{- end }}

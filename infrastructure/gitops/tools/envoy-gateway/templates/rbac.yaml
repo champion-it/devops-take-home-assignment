@@ -1,0 +1,273 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "envoy-gateway.fullname" . }}
+  labels:
+    {{- include "envoy-gateway.labels" . | nindent 4 }}
+rules:
+# Core resources — read (cluster-scoped: nodes, pods, namespaces, endpoints)
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - nodes
+  - pods
+  - endpoints
+  - services
+  - secrets
+  - configmaps
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+# Core resources — write (EG provisions proxy infra: services, secrets, configmaps, serviceaccounts)
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - secrets
+  - configmaps
+  - serviceaccounts
+  verbs:
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Apps resources — EG provisions Deployments and DaemonSets for proxy pods
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - daemonsets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# HPA — EG manages autoscaling for proxy Deployments
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Batch — EG creates Jobs for certgen and other tasks
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Policy — EG creates PodDisruptionBudgets for proxy HA
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# EndpointSlices — required for backend service discovery
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+# RBAC — EG provisions roles/rolebindings for proxy ServiceAccounts
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - roles
+  - rolebindings
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+# Gateway API resources
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gatewayclasses
+  - gateways
+  - httproutes
+  - referencegrants
+  - tlsroutes
+  - tcproutes
+  - udproutes
+  - grpcroutes
+  - backendtlspolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gatewayclasses/status
+  - gateways/status
+  - httproutes/status
+  - tlsroutes/status
+  - tcproutes/status
+  - udproutes/status
+  - grpcroutes/status
+  - backendtlspolicies/status
+  verbs:
+  - get
+  - update
+  - patch
+# Envoy Gateway CRDs
+- apiGroups:
+  - gateway.envoyproxy.io
+  resources:
+  - envoyproxies
+  - envoypatchpolicies
+  - clienttrafficpolicies
+  - backendtrafficpolicies
+  - securitypolicies
+  - envoyextensionpolicies
+  - httproutefilters
+  - backends
+  - backendtlspolicies
+  - backendlbpolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - gateway.envoyproxy.io
+  resources:
+  - envoyproxies/status
+  - envoypatchpolicies/status
+  - clienttrafficpolicies/status
+  - backendtrafficpolicies/status
+  - securitypolicies/status
+  - envoyextensionpolicies/status
+  - httproutefilters/status
+  - backends/status
+  - backendtlspolicies/status
+  - backendlbpolicies/status
+  verbs:
+  - get
+  - update
+  - patch
+# Events
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "envoy-gateway.fullname" . }}
+  labels:
+    {{- include "envoy-gateway.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "envoy-gateway.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "envoy-gateway.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "envoy-gateway.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "envoy-gateway.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "envoy-gateway.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "envoy-gateway.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "envoy-gateway.fullname" . }}-leader-election
+subjects:
+- kind: ServiceAccount
+  name: {{ include "envoy-gateway.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

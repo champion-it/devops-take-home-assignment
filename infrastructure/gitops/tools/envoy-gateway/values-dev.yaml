@@ -1,0 +1,86 @@
+profile: custom
+
+proxy:
+  kind: DaemonSet  # One proxy per node
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Cluster 
+    annotations:
+      kubernetes.io/elb.class: "union"
+      kubernetes.io/elb.id: "98ee8680-5977-4f85-b2ec-4b74d4834f0e"
+    nodePorts:
+      - name: http-80
+        port: 80
+        nodePort: 32270
+      - name: https-443
+        port: 443
+        nodePort: 31114
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+gateway:
+  create: true
+  listeners:
+    http:
+      enabled: true
+      port: 80
+      allowedRoutesFrom: All
+    https:
+      enabled: true
+      port: 443
+      allowedRoutesFrom: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: dwl-internal-tls
+          - name: divinewallet-co-th-cert-secret
+            namespace: wallet-dev
+
+  referenceGrants:
+    - name: gateway-to-divinewallet-cert
+      namespace: wallet-dev
+      from:
+        - kind: Gateway
+          namespace: envoy-gateway-system
+      to:
+        - kind: Secret
+          name: divinewallet-co-th-cert-secret
+
+rateLimiting:
+  enabled: false
+  redis:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 2Gi
+  presets:
+    api: true
+
+monitoring:
+  enabled: false
+  prometheus:
+    serviceMonitor: true
+    prometheusRule: true
+  grafana:
+    dashboards: true
+  accessLogs:
+    enabled: true
+    format: json
+
+security:
+  networkPolicies: true
+  podSecurityStandards: true
+
+highAvailability:
+  enabled: true
+  podDisruptionBudget:
+    minAvailable: 1
+
+gatewayAPI:
+  examples:
+    enabled: false

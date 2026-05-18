@@ -1,0 +1,7 @@
+variables:
+  IMAGE_NAME: devops-frontend
+
+include:
+  - project: 'infrastructure/cicd'
+    ref: main
+    file: 'demo/gitlab-ci.yml'

@@ -1,0 +1,60 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: backend-private
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-gateway
+      namespace: envoy-gateway-system
+      sectionName: http
+  hostnames:
+    - prod-api-backend.dwl.internal
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: backend
+          port: 8080
+          weight: 1
+      timeouts:
+        request: 3600s
+        backendRequest: 3600s
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: backend-backend-policy
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: backend-private
+  timeout:
+    http:
+      requestTimeout: 3600s
+      connectionIdleTimeout: 3600s
+  compression:
+    - type: Gzip
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: backend-security-policy
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: backend-private
+  cors:
+    allowOrigins:
+      - "*"
+    allowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD]
+    allowHeaders: ["*"]
+    exposeHeaders: ["*"]
+    maxAge: 1800s

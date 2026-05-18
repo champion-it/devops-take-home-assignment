@@ -1,0 +1,24 @@
+# Dot-source this file BEFORE running terraform:
+#   . .\scripts\tf-env.ps1
+#
+# Copy to scripts/tf-env.ps1 and fill in your real AK/SK.
+# scripts/tf-env.ps1 is gitignored so secrets don't leak.
+
+# ---- Huawei Cloud credentials --------------------------------------------
+$AK = "<your-huawei-access-key>"
+$SK = "<your-huawei-secret-key>"
+
+$env:HW_ACCESS_KEY        = $AK
+$env:HW_SECRET_KEY        = $SK
+$env:AWS_ACCESS_KEY_ID    = $AK
+$env:AWS_SECRET_ACCESS_KEY = $SK
+
+# ---- Project defaults -----------------------------------------------------
+$env:HW_REGION         = "ap-southeast-2"
+$env:TF_STATE_BUCKET   = "devops-takehome-tfstate"
+
+# Optional: override Argo CD git repo
+# $env:TF_VAR_git_repo     = "https://github.com/YOUR_USER/devops-takehome.git"
+# $env:TF_VAR_git_revision = "main"
+
+Write-Host "✅ Terraform env loaded (region=$($env:HW_REGION), bucket=$($env:TF_STATE_BUCKET))" -ForegroundColor Green

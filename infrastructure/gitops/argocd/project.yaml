@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: devops-demo
+  namespace: argocd
+spec:
+  description: DevOps take-home demo (backend + frontend)
+  sourceRepos:
+    # TODO: replace with your actual GitLab repo URL
+    - http://gitlab.dwl.internal/infrastructure/gitops/kustomize-demo.git
+  destinations:
+    - namespace: devops-demo
+      server: https://kubernetes.default.svc
+    - namespace: envoy-gateway-system  # HTTPRoute parent ref
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

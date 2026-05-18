@@ -1,0 +1,6 @@
+apiVersion: v2
+name: routes
+description: HTTPRoutes for internal tools (kafka-ui, redisinsight, vault) on private domain via envoy-gateway
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

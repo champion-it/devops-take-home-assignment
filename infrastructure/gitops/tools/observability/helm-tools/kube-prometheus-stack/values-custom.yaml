@@ -1,0 +1,409 @@
+# Project overrides for the kube-prometheus-stack chart.
+# Sits beside the chart's untouched `values.yaml` (chart defaults).
+# Install with:
+#   helm upgrade --install kps ./helm-tools/kube-prometheus-stack \
+#     -f ./helm-tools/kube-prometheus-stack/values.custom.yaml \
+#     -n monitoring
+#
+# Everything app-specific lives here — alerts, scrape configs, datasources,
+# Alertmanager routing — so no separate YAMLs need to be applied afterwards.
+
+fullnameOverride: kps
+
+defaultRules:
+  create: true
+  rules:
+    # Huawei CCE hides these control-plane components — Prometheus cannot
+    # scrape them, so the *Down alerts fire forever as false positives.
+    kubeScheduler: false
+    kubeControllerManager: false
+    kubeProxy: false
+    # Also skip etcd alerts (managed by Huawei, no access)
+    etcd: false
+
+# Disable the matching ServiceMonitors so Prometheus doesn't try to scrape
+# control-plane endpoints that don't exist for managed users.
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+# ─────────────────────────────────────────────────────────────────────────
+# Alertmanager — routing + receivers. Critical alerts → pager, rest → default.
+# Replace the example.invalid webhooks with real Slack / PagerDuty endpoints.
+# ─────────────────────────────────────────────────────────────────────────
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: csi-disk
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: discord-default
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - matchers:
+            - severity = "critical"
+          receiver: discord-critical
+          continue: true
+    receivers:
+      # For production: store webhook_url in a Secret and reference it via
+      # `webhook_url_file:` (mount through alertmanagerSpec.secrets).
+      - name: discord-default
+        discord_configs:
+          - webhook_url: 'https://discord.com/api/webhooks/1505860032682528799/zvCts9eWA5zdkq5dabnDtMOl9RiIUVq2NIFANHjslPHKNS38ZiVGT1SdPj6mmIHiqP2u'
+            send_resolved: true
+            title: '{{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}'
+            message: |-
+              {{ range .Alerts }}
+              **{{ or .Annotations.summary .Labels.alertname }}**
+              > {{ .Annotations.description }}
+
+              {{- if .Labels.severity }}
+              • **severity** — `{{ .Labels.severity }}`
+              {{- end }}
+              {{- if .Labels.namespace }}
+              • **target** — `{{ .Labels.namespace }}{{ if .Labels.pod }}/{{ .Labels.pod }}{{ end }}`
+              {{- else }}
+              • **scope** — cluster
+              {{- end }}
+              {{- if .Labels.container }}
+              • **container** — `{{ .Labels.container }}`
+              {{- end }}
+              {{- if .Labels.node }}
+              • **node** — `{{ .Labels.node }}`
+              {{- end }}
+              • **started** — {{ .StartsAt.Format "15:04:05 MST" }}
+              {{ end }}
+      - name: discord-critical
+        discord_configs:
+          - webhook_url: 'https://discord.com/api/webhooks/1505860032682528799/zvCts9eWA5zdkq5dabnDtMOl9RiIUVq2NIFANHjslPHKNS38ZiVGT1SdPj6mmIHiqP2u'
+            send_resolved: true
+            title: '{{ if eq .Status "firing" }}🚨 CRITICAL ({{ .Alerts.Firing | len }}){{ else }}✅ RESOLVED{{ end }} — {{ .CommonLabels.alertname }}'
+            message: |-
+              @here
+              {{ range .Alerts }}
+              **{{ or .Annotations.summary .Labels.alertname }}**
+              > {{ .Annotations.description }}
+
+              {{- if .Labels.namespace }}
+              • **target** — `{{ .Labels.namespace }}{{ if .Labels.pod }}/{{ .Labels.pod }}{{ end }}`
+              {{- else }}
+              • **scope** — cluster
+              {{- end }}
+              {{- if .Labels.container }}
+              • **container** — `{{ .Labels.container }}`
+              {{- end }}
+              {{- if .Labels.node }}
+              • **node** — `{{ .Labels.node }}`
+              {{- end }}
+              • **started** — {{ .StartsAt.Format "15:04:05 MST" }}
+              {{ end }}
+
+# ─────────────────────────────────────────────────────────────────────────
+# Prometheus — retention, storage, scraping, additional PodMonitor for the app.
+# ─────────────────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 7d # tuned down from 15d for single-node demo
+    resources:
+      requests:
+        cpu: 150m
+        memory: 512Mi
+      limits:
+        memory: 1.5Gi # leaves headroom on a 8GiB node
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: csi-disk
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi # was 20Gi
+    # Scrape every namespace, not just `monitoring`.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    # Also pick up Pods that use prometheus.io/scrape annotations.
+    additionalScrapeConfigs:
+      - job_name: kubernetes-pods-annotated
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels:
+              - __address__
+              - __meta_kubernetes_pod_annotation_prometheus_io_port
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
+
+# In-line PodMonitor — scrapes the backend Pods at /metrics every 15s.
+additionalPodMonitors:
+  - name: devops-backend
+    namespaceSelector:
+      matchNames: [devops-demo]
+    selector:
+      matchLabels:
+        app: backend
+    podMetricsEndpoints:
+      - port: http
+        path: /metrics
+        interval: 15s
+
+# ─────────────────────────────────────────────────────────────────────────
+# Alert rules for the app + cluster. Rendered as a PrometheusRule by kps.
+# ─────────────────────────────────────────────────────────────────────────
+additionalPrometheusRulesMap:
+  devops-app-rules:
+    groups:
+      - name: devops-app.pod
+        rules:
+          - alert: PodCrashLooping
+            expr: |
+              increase(kube_pod_container_status_restarts_total{namespace="devops-demo"}[10m]) > 3
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash-looping"
+              description: "Container restarted more than 3 times in the last 10 minutes."
+
+          - alert: PodNotReady
+            expr: |
+              sum by (namespace, pod) (
+                kube_pod_status_phase{namespace="devops-demo",phase!~"Running|Succeeded"}
+              ) > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} not Ready"
+              description: "Pod has been in a non-Running phase for 5 minutes."
+
+          - alert: PodOOMKilled
+            expr: |
+              increase(kube_pod_container_status_last_terminated_reason{namespace="devops-demo",reason="OOMKilled"}[15m]) > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} was OOMKilled"
+              description: "Container hit its memory limit and was killed. Investigate the leak or raise limits."
+
+          - alert: PodImagePullFailing
+            expr: |
+              sum by (namespace, pod) (
+                kube_pod_container_status_waiting_reason{namespace="devops-demo",reason=~"ImagePullBackOff|ErrImagePull"}
+              ) > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} cannot pull image"
+              description: "Container stuck in ImagePullBackOff / ErrImagePull. Check the SWR tag and pull credentials."
+
+      - name: devops-app.resource
+        rules:
+          - alert: HighCPUUsage
+            expr: |
+              100 * sum by (namespace, pod) (
+                rate(container_cpu_usage_seconds_total{namespace="devops-demo",container!="",container!="POD"}[5m])
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_limits{namespace="devops-demo",resource="cpu"}
+              ) > 85
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.pod }} CPU usage > 85%"
+              description: "CPU usage has exceeded 85% of its limit for 10 minutes."
+
+          - alert: HighMemoryUsage
+            expr: |
+              100 * sum by (namespace, pod) (
+                container_memory_working_set_bytes{namespace="devops-demo",container!="",container!="POD"}
+              )
+              /
+              sum by (namespace, pod) (
+                kube_pod_container_resource_limits{namespace="devops-demo",resource="memory"}
+              ) > 90
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.pod }} memory > 90% of limit"
+              description: "Memory usage > 90% of limit for 10 minutes — risk of OOMKill."
+
+      - name: devops-app.app
+        rules:
+          - alert: BackendHighErrorRate
+            expr: |
+              sum(rate(http_requests_total{service="devops-backend",status_code=~"5.."}[5m]))
+              /
+              sum(rate(http_requests_total{service="devops-backend"}[5m])) > 0.05
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Backend 5xx rate > 5%"
+              description: "Backend service is returning more than 5% 5xx responses over the last 5 minutes."
+
+          - alert: BackendLatencyP95High
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(http_request_duration_seconds_bucket{service="devops-backend"}[5m]))
+              ) > 1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Backend p95 latency > 1s"
+              description: "p95 latency above 1 second for 10 minutes."
+
+          - alert: BackendDown
+            expr: up{job=~".*backend.*"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Backend scrape target is down"
+              description: "Prometheus cannot scrape the backend for 2 minutes."
+
+      - name: devops-app.ingress
+        rules:
+          - alert: Ingress5xxRate
+            expr: |
+              sum(rate(nginx_ingress_controller_requests{namespace="devops-demo",status=~"5.."}[5m]))
+              /
+              sum(rate(nginx_ingress_controller_requests{namespace="devops-demo"}[5m])) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Ingress 5xx rate > 5%"
+              description: "ingress-nginx returning >5% 5xx for {{ $labels.host }} over 5 minutes."
+
+          - alert: IngressLatencyP95High
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le, ingress, host) (
+                  rate(nginx_ingress_controller_request_duration_seconds_bucket{namespace="devops-demo"}[5m])
+                )
+              ) > 2
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Ingress p95 latency > 2s"
+              description: "p95 ingress latency above 2 seconds for {{ $labels.host }} over 10 minutes."
+
+      - name: devops-app.tracing
+        rules:
+          - alert: TempoIngesterDown
+            expr: up{job=~".*tempo.*"} == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Tempo scrape target down"
+              description: "Cannot scrape Tempo for 5 minutes — traces may be lost."
+
+          - alert: BackendNoTracesIngested
+            expr: |
+              (sum(rate(tempo_distributor_spans_received_total{}[15m])) or vector(0)) == 0
+              and
+              sum(rate(http_requests_total{service="devops-backend"}[15m])) > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Backend serving traffic but no traces reach Tempo"
+              description: "Check OTEL_EXPORTER_OTLP_ENDPOINT in the backend Deployment and NetworkPolicy egress."
+
+# ─────────────────────────────────────────────────────────────────────────
+# Grafana — DISABLED for the minimal alerts-only setup (sub-ENI quota).
+# Re-enable by setting enabled: true if you want the UI back.
+# ─────────────────────────────────────────────────────────────────────────
+grafana:
+  enabled: false
+
+# ─────────────────────────────────────────────────────────────────────────
+# kube-state-metrics — REQUIRED. The alert rules in this file use
+# kube_pod_container_status_*, kube_pod_status_phase, etc. — all emitted
+# by this exporter. Disabling it breaks half the alerts.
+# ─────────────────────────────────────────────────────────────────────────
+kube-state-metrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# ─────────────────────────────────────────────────────────────────────────
+# node-exporter — DISABLED. DaemonSet = 1 pod/ENI per node (3 ENIs total).
+# Lost: node CPU/mem/disk/network metrics. Kept: pod-level metrics via
+# the kubelet's built-in cAdvisor, which is enough for the app alerts.
+# ─────────────────────────────────────────────────────────────────────────
+nodeExporter:
+  enabled: false
+
+prometheus-node-exporter:
+  enabled: false
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  # Skip the cert-gen Job + ValidatingWebhook. Saves 1 pod (sub-ENI quota).
+  # Trade-off: no admission validation of PrometheusRule CRs before apply.
+  admissionWebhooks:
+    enabled: false
+  # TLS for the operator's own /metrics. Disable to avoid the cert-gen Job.
+  tls:
+    enabled: false

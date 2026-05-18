@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Source this file BEFORE running terraform:
+#   source scripts/tf-env.sh
+#
+# Copy to scripts/tf-env.sh and fill in your real AK/SK.
+# scripts/tf-env.sh is gitignored so secrets don't leak.
+
+# ---- Huawei Cloud credentials ---------------------------------------------
+# Get these from: Console → My Credentials → Access Keys.
+AK="<your-huawei-access-key>"
+SK="<your-huawei-secret-key>"
+
+# Huawei provider reads these.
+export HW_ACCESS_KEY="$AK"
+export HW_SECRET_KEY="$SK"
+
+# Terraform's S3 backend (we use it against Huawei OBS) reads the AWS-named
+# env vars. Same value, different name — required, not optional.
+export AWS_ACCESS_KEY_ID="$AK"
+export AWS_SECRET_ACCESS_KEY="$SK"
+
+# Huawei OBS doesn't accept the streaming SHA256 checksum the newer AWS SDK
+# sends by default → state upload fails with XAmzContentSHA256Mismatch.
+# These 2 vars force SDK to only checksum when required.
+export AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED
+export AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED
+
+# ---- Project defaults ------------------------------------------------------
+export HW_REGION="ap-southeast-2"          # Bangkok
+export TF_STATE_BUCKET="devops-takehome-tfstate"
+
+# Optional: override Argo CD git repo (used by envs/production)
+# export TF_VAR_git_repo="https://github.com/champion-it/devops-demo-assignment.git"
+# export TF_VAR_git_revision="main"
+
+# Worker node root password (alternative to key_pair_name).
+# 8-26 chars, must include 3 of: A-Z, a-z, 0-9, special (!@$%^-_=+[{}]:,./?).
+# export TF_VAR_root_password='P@ssw0rd@ea1$'
+
+echo "✅ Terraform env loaded (region=$HW_REGION, bucket=$TF_STATE_BUCKET)"

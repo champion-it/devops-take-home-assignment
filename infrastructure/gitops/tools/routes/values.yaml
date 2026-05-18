@@ -1,0 +1,31 @@
+# Gateway 
+gateway:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+  sectionName: https
+
+# list route
+routes:
+  redisinsight:
+    enabled: true
+    hostname: redis-ui-dev.dwl.internal
+    namespace: datastore
+    backend:
+      service: redisinsight
+      port: 5540
+
+  kafka-ui:
+    enabled: true
+    hostname: kafka-ui-dev.dwl.internal
+    namespace: datastore
+    backend:
+      service: kafka-ui
+      port: 8080
+
+  vault:
+    enabled: true
+    hostname: vault-dev.dwl.internal
+    namespace: vault
+    backend:
+      service: hashicorp-vault
+      port: 8200

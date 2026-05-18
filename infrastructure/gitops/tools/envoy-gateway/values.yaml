@@ -1,0 +1,390 @@
+# Default values for envoy-gateway
+# This is a YAML-formatted file.
+
+# -- Profile preset for quick deployment
+# @default -- custom
+# Options: dev, production-ha, custom
+profile: custom
+
+## Controller (EG operator pod)
+controller:
+  # -- Number of controller replicas (overridden by profile)
+  replicaCount: 1
+
+  image:
+    # -- Controller image repository
+    repository: docker.io/envoyproxy/gateway
+    # -- Controller image pull policy
+    pullPolicy: IfNotPresent
+    # -- Controller image tag (defaults to chart appVersion)
+    tag: "v1.7.1"
+
+  # -- Resources for controller (overridden by profile)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  # -- Node selector for controller pods
+  nodeSelector: {}
+
+  # -- Tolerations for controller pods
+  tolerations: []
+
+  # -- Affinity rules for controller pods
+  affinity: {}
+
+  # -- Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+## Certgen Job (generates TLS certs for controller webhook + xDS)
+certgen:
+  image:
+    # -- Certgen image repository
+    repository: docker.io/envoyproxy/gateway
+    # -- Certgen image pull policy
+    pullPolicy: IfNotPresent
+    # -- Certgen image tag (defaults to chart appVersion)
+    tag: "v1.7.1"
+
+## Proxy configuration via EnvoyProxy CRD (EG manages the actual proxy pods)
+proxy:
+  # -- Proxy provisioning mode: Deployment or DaemonSet
+  kind: Deployment
+  # -- Number of proxy replicas (only for Deployment kind)
+  replicaCount: 1
+
+  image:
+    # -- Proxy image repository
+    repository: docker.io/envoyproxy/envoy
+    # -- Proxy image pull policy
+    pullPolicy: IfNotPresent
+    # -- Envoy image tag for EG v1.7.1 (distroless)
+    tag: "distroless-v1.33.0"
+
+  # -- Resources for proxy pods (overridden by profile)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  service:
+    # -- Proxy service type
+    type: LoadBalancer
+    # -- Annotations for proxy service
+    annotations: {}
+
+  # -- Horizontal Pod Autoscaler (only for Deployment kind)
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+
+  # -- Node selector for proxy pods
+  nodeSelector: {}
+
+  # -- Tolerations for proxy pods
+  tolerations: []
+
+  # -- Affinity rules for proxy pods
+  affinity: {}
+
+## GatewayClass
+gatewayClass:
+  # -- GatewayClass name
+  name: envoy-gateway
+  # -- Create GatewayClass resource
+  create: true
+
+## Gateway resource (triggers EG to provision proxy pods)
+gateway:
+  # -- Create a default Gateway resource
+  create: true
+  # -- Name of the Gateway (defaults to release name)
+  name: ""
+  listeners:
+    http:
+      enabled: true
+      port: 80
+    https:
+      enabled: false
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRef:
+          # -- Name of the TLS secret (must be in same namespace)
+          name: ""
+          namespace: ""
+
+## SecurityPolicy — EG-native auth (JWT, OIDC, API Key, CORS)
+securityPolicy:
+  # -- Create a SecurityPolicy resource
+  create: false
+  # -- Target Gateway or HTTPRoute (Gateway or HTTPRoute)
+  targetKind: Gateway
+  # -- Target resource name (defaults to gateway.name or release name)
+  targetName: ""
+
+  jwt:
+    enabled: false
+    providers: []
+    # Example:
+    # - name: google
+    #   issuer: https://accounts.google.com
+    #   audiences:
+    #     - my-app
+    #   remoteJWKS:
+    #     uri: https://www.googleapis.com/oauth2/v3/certs
+
+  oidc:
+    enabled: false
+    provider:
+      issuer: ""
+      authorizationEndpoint: ""
+      tokenEndpoint: ""
+    clientID: ""
+    clientSecret:
+      name: ""
+    redirectURL: ""
+    scopes:
+      - openid
+
+  apiKey:
+    enabled: false
+    # -- Secret names containing API keys (key: key-name, value: api-key)
+    credentials: []
+    # - name: my-api-keys
+
+  cors:
+    enabled: false
+    allowOrigins:
+      - "*"
+    allowMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowHeaders:
+      - Authorization
+      - Content-Type
+    maxAge: 86400
+
+## BackendTrafficPolicy — retries, timeouts, circuit breaking, health checks
+backendTrafficPolicy:
+  # -- Create a BackendTrafficPolicy resource
+  create: false
+  # -- Target Gateway or HTTPRoute
+  targetKind: Gateway
+  targetName: ""
+
+  retries:
+    enabled: false
+    numRetries: 3
+    perTryTimeout: "10s"
+    retryOn:
+      httpStatusCodes:
+        - 502
+        - 503
+        - 504
+      triggers:
+        - connect-failure
+        - retriable-status-codes
+
+  timeout:
+    http:
+      # -- How long the proxy will wait for a complete request
+      requestTimeout: "60s"
+      # -- How long the proxy will wait for a response from the backend
+      idleTimeout: "60s"
+
+  circuitBreaker:
+    enabled: false
+    maxConnections: 1024
+    maxParallelRequests: 1024
+    maxPendingRequests: 1024
+
+  healthCheck:
+    active:
+      enabled: false
+      timeout: "1s"
+      interval: "3s"
+      unhealthyThreshold: 3
+      healthyThreshold: 1
+      http:
+        path: "/health"
+        expectedStatuses:
+          - 200
+
+## ClientTrafficPolicy — listener-level settings
+clientTrafficPolicy:
+  # -- Create a ClientTrafficPolicy resource
+  create: false
+  targetName: ""
+
+  connection:
+    # -- Maximum concurrent connections per listener
+    connectionLimit:
+      value: 10000
+
+  tls:
+    # -- Minimum TLS version (TLSv1.2 or TLSv1.3)
+    minVersion: "TLSv1.2"
+    # -- Maximum TLS version
+    maxVersion: "TLSv1.3"
+    ciphers: []
+
+  http1:
+    enableTrailers: true
+    preserveHeaderCase: false
+    http10:
+      enabled: false
+
+  http2:
+    initialStreamWindowSize: "64Ki"
+    initialConnectionWindowSize: "1Mi"
+
+  timeout:
+    http:
+      # -- Request timeout on the listener side
+      requestReceivedTimeout: "10s"
+
+## Rate Limiting
+rateLimiting:
+  # -- Enable global rate limiting
+  enabled: false
+  # -- Rate limit service (envoyproxy/ratelimit) — deployed by EG when enabled
+  service:
+    image:
+      repository: docker.io/envoyproxy/ratelimit
+      tag: "19f2079f"
+  # -- Use an external Redis instead of the bundled subchart
+  # Set this if redis.enabled=false and you want to point to your own Redis.
+  externalRedis:
+    host: ""
+    port: 6379
+    auth:
+      enabled: false
+      secretName: ""
+      secretKey: password
+  # -- Pre-built rate limit policy presets
+  presets:
+    # -- Apply 100 req/min per IP to default gateway
+    api: false
+    # -- Apply 10 req/min per IP to default gateway
+    strict: false
+
+# =============================================================================
+# Redis subchart (helmforge/redis) — used for global rate limiting state
+# Set rateLimiting.enabled=true together with redis.enabled=true to activate.
+# All keys here are forwarded to the helmforge/redis chart.
+# See: https://helmforge.dev/docs/charts/redis
+# =============================================================================
+redis:
+  # -- Enable the Redis subchart for rate limiting
+  enabled: false
+  # -- Redis topology (standalone is sufficient for rate limiting)
+  architecture: standalone
+  auth:
+    # -- Enable password authentication
+    enabled: true
+    # -- Auto-generated password if empty
+    password: ""
+  standalone:
+    persistence:
+      enabled: true
+      size: 1Gi
+      storageClass: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+## Monitoring and Observability
+monitoring:
+  # -- Enable monitoring (Prometheus)
+  enabled: false
+  prometheus:
+    # -- Create ServiceMonitor for Prometheus Operator
+    serviceMonitor: true
+    # -- Create PrometheusRule with alert rules
+    prometheusRule: false
+  grafana:
+    # -- Create ConfigMap with Grafana dashboards
+    dashboards: false
+  accessLogs:
+    enabled: true
+    # -- Access log format (json or text)
+    format: json
+
+## Security and Hardening
+security:
+  # -- Enable NetworkPolicies
+  networkPolicies: false
+  # -- Enable PodSecurityStandard restricted
+  podSecurityStandards: true
+
+## High Availability
+highAvailability:
+  # -- Enable HA mode (controller replicas, anti-affinity, PDB)
+  enabled: false
+  podDisruptionBudget:
+    minAvailable: 1
+
+## Gateway API Examples
+gatewayAPI:
+  examples:
+    # -- Create example Gateway and HTTPRoute resources
+    enabled: true
+    # -- Namespace for example resources (defaults to Release.Namespace)
+    namespace: ""
+
+## ServiceAccount
+serviceAccount:
+  # -- Create service account
+  create: true
+  # -- Service account name (generated if not set)
+  name: ""
+  # -- Annotations for service account
+  annotations: {}
+
+## RBAC
+rbac:
+  # -- Create RBAC resources
+  create: true
+
+## Image pull secrets
+imagePullSecrets: []
+
+## Name overrides
+nameOverride: ""
+fullnameOverride: ""
+
+## Pod annotations
+podAnnotations: {}
+
+## Pod labels
+podLabels: {}
+
+kubernetesClusterDomain: cluster.local

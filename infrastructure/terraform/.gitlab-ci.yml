@@ -1,0 +1,4 @@
+include:
+  - project: 'infrastructure/cicd'
+    ref: main
+    file: 'infra/gitlab-ci.yml'

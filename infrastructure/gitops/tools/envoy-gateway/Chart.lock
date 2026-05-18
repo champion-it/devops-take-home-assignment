@@ -1,0 +1,6 @@
+dependencies:
+- name: redis
+  repository: oci://ghcr.io/helmforgedev/helm
+  version: 1.6.9
+digest: sha256:0c169ee8160e4e8315f1dd6ba202adaea0f48a488934ba4a6e952ee0100d5124
+generated: "2026-04-13T13:00:05.532456445Z"

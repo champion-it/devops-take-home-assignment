@@ -1,0 +1,14 @@
+gateway:
+  name: envoy-gateway
+  namespace: envoy-gateway-system
+  sectionNames:
+    - https
+
+routes:
+  vault:
+    enabled: true
+    hostname: vault.example.internal
+    namespace: vault
+    backend:
+      service: hashicorp-vault
+      port: 8200

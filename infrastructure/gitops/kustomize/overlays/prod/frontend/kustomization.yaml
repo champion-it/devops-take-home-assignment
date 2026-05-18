@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: devops-demo
+
+labels:
+  - includeSelectors: false
+    pairs:
+      env: prod
+      part-of: devops-takehome
+
+resources:
+  - ../../../base/frontend
+  - httproute.yaml
+
+configMapGenerator:
+  - name: frontend-config
+    behavior: merge
+    envs:
+      - configmap.env
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+images:
+  - name: swr.ap-southeast-2.myhuaweicloud.com/devops-demo/devops-frontend
+    newTag: latest
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: frontend

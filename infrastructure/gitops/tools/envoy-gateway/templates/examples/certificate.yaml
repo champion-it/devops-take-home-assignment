@@ -1,0 +1,2 @@
+{{- /* cert-manager Certificate example - disabled by default as cert-manager is not a dependency */ -}}
+{{- /* Uncomment and configure to use cert-manager for TLS certificate management */ -}}

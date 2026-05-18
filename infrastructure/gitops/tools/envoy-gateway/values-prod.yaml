@@ -1,0 +1,61 @@
+profile: production-ha
+
+proxy:
+  kind: DaemonSet  # One proxy per node
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Local
+    annotations:
+      kubernetes.io/elb.class: "union"
+      kubernetes.io/elb.id: "REPLACE_WITH_PROD_ELB_ID"
+    nodePorts:
+      - name: http-80
+        port: 80
+        nodePort: 32270
+      - name: https-443
+        port: 443
+        nodePort: 31114
+
+gateway:
+  create: true
+  listeners:
+    http:
+      enabled: true
+      port: 80
+    https:
+      enabled: false
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRef:
+          name: my-tls-cert  # Created separately
+
+rateLimiting:
+  enabled: false
+  redis:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 2Gi
+  presets:
+    api: true
+
+monitoring:
+  enabled: false
+  prometheus:
+    serviceMonitor: true
+    prometheusRule: true
+  grafana:
+    dashboards: true
+  accessLogs:
+    enabled: true
+    format: json
+
+security:
+  networkPolicies: true
+  podSecurityStandards: true
+
+highAvailability:
+  enabled: true
+  podDisruptionBudget:
+    minAvailable: 1

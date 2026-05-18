@@ -1,0 +1,74 @@
+# Project overrides for the Tempo (single-binary) chart.
+# Install with:
+#   helm upgrade --install tempo ./helm-tools/tempo \
+#     -f ./helm-tools/tempo/values.custom.yaml \
+#     -n monitoring
+#
+# Receivers enabled:
+#   • OTLP gRPC :4317 — backend SDK default
+#   • OTLP HTTP :4318 — backend sends here (OTEL_EXPORTER_OTLP_ENDPOINT)
+#   • Jaeger    :14268 — legacy compat for migrations
+#
+# Storage: local filesystem (assignment scope). Production: switch
+# tempo.storage.trace.backend to "s3" + point at an OBS bucket.
+
+tempo:
+  reportingEnabled: false
+
+  # Metrics generator is CPU/RAM-heavy — keep ON for service-graph + RED
+  # metrics, but reduce processor scope so it fits a small node.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://kps-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
+    processor:
+      service_graphs:
+        wait: 10s
+      span_metrics:
+        enable_target_info: true
+    storage:
+      path: "/var/tempo/metrics"
+
+  # Shorter retention for single-node demo (24h instead of 72h).
+  retention: 24h
+
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+    jaeger:
+      protocols:
+        thrift_http:
+          endpoint: 0.0.0.0:14268
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+persistence:
+  enabled: true
+  size: 5Gi # was 10Gi (tuned for single-node demo)
+  storageClassName: csi-disk # Huawei CCE default SC
+
+service:
+  type: ClusterIP
+
+# Auto-discover by Prometheus (kps).
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: kps

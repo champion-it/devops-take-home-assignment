@@ -1,0 +1,34 @@
+# Active service — Argo Rollouts controller manages the selector
+# (injects rollouts-pod-template-hash to point at the active ReplicaSet).
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Preview service — Rollout points this at the candidate ReplicaSet during a
+# deploy so you can smoke-test before running `kubectl argo rollouts promote`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-preview
+  labels:
+    app: backend
+    role: preview
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
