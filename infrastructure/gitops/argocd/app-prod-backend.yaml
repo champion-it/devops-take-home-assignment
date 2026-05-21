@@ -3,6 +3,19 @@ kind: Application
 metadata:
   name: devops-demo-prod-backend
   namespace: argocd
+  annotations:
+    # === argocd-image-updater config ===
+    # Prod tracks SemVer release tags only (vX.Y.Z) — no auto-promote of pre-releases.
+    argocd-image-updater.argoproj.io/image-list: |
+      backend=swr.ap-southeast-2.myhuaweicloud.com/devops-demo/devops-backend
+    argocd-image-updater.argoproj.io/backend.update-strategy: semver
+    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^v\d+\.\d+\.\d+$
+    argocd-image-updater.argoproj.io/backend.ignore-tags: "*-rc*,*-beta*,*-alpha*"
+    argocd-image-updater.argoproj.io/backend.kustomize.image-name: swr.ap-southeast-2.myhuaweicloud.com/devops-demo/devops-backend
+    argocd-image-updater.argoproj.io/backend.pull-secret: pullsecret:argocd/swr-pull-secret
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
+    argocd-image-updater.argoproj.io/write-back-target: kustomization:overlays/prod/backend
+    argocd-image-updater.argoproj.io/git-branch: main
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

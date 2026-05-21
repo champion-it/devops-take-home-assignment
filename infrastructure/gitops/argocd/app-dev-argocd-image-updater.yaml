@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-image-updater-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform-tools
+  source:
+    repoURL: http://gitlab.dwl.internal/infrastructure/gitops/kustomize-demo.git
+    targetRevision: main
+    path: infrastructure/gitops/tools/argocd-image-updater
+    helm:
+      releaseName: argocd-image-updater
+      # Chart.yaml pins version: 1.2.1 (appVersion v1.2.0)
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    # Runs alongside Argo CD (recommended).
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

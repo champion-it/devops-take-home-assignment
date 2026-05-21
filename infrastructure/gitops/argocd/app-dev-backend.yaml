@@ -3,6 +3,23 @@ kind: Application
 metadata:
   name: devops-demo-dev-backend
   namespace: argocd
+  annotations:
+    # === argocd-image-updater config ===
+    # Track backend image from SWR. Alias `backend` is referenced below.
+    argocd-image-updater.argoproj.io/image-list: |
+      backend=swr.ap-southeast-2.myhuaweicloud.com/devops-demo/devops-backend
+    # Dev uses BlueGreen with a fixed tag (:blue / :green) — track by digest
+    # so we redeploy whenever CI pushes a new build under the same tag.
+    argocd-image-updater.argoproj.io/backend.update-strategy: digest
+    argocd-image-updater.argoproj.io/backend.allow-tags: regexp:^(blue|green|dev-[a-f0-9]{7,40})$
+    argocd-image-updater.argoproj.io/backend.helm.image-name: image.repository
+    argocd-image-updater.argoproj.io/backend.helm.image-tag: image.tag
+    argocd-image-updater.argoproj.io/backend.kustomize.image-name: swr.ap-southeast-2.myhuaweicloud.com/devops-demo/devops-backend
+    argocd-image-updater.argoproj.io/backend.pull-secret: pullsecret:argocd/swr-pull-secret
+    # Write-back: commit a Kustomize image override into the overlay on `main`.
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
+    argocd-image-updater.argoproj.io/write-back-target: kustomization:overlays/dev/backend
+    argocd-image-updater.argoproj.io/git-branch: main
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
