@@ -11,83 +11,105 @@ to evidence captured from the live deployment.
 
 ![High-level architecture](docs/images/01-architecture-overview.png)
 
-```mermaid
-graph TD
-    classDef default fill:#1e293b,stroke:#38bdf8,stroke-width:1px,color:#e2e8f0;
-    classDef vpc fill:#0f172a,stroke:#334155,stroke-dasharray: 5 5,color:#94a3b8;
-    classDef cluster fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#c7d2fe;
-    classDef ext fill:#0c0a09,stroke:#78716c,stroke-width:1px,color:#e7e5e4;
-    classDef app fill:#064e3b,stroke:#34d399,stroke-width:1px,color:#e2e8f0;
-    classDef observability fill:#312e81,stroke:#a5b4fc,stroke-dasharray: 3 3,color:#e2e8f0;
-
-    Internet[("Internet / Users")]:::ext
-    
-    subgraph VPC ["Huawei Cloud VPC"]
-        EIP["Public EIP"]
-        ELB["Dedicated ELB<br>(L7 Load Balancer)"]
-        
-        subgraph CCE ["CCE Cluster (Kubernetes 1.33)"]
-            subgraph Platform ["Platform Tier"]
-                EG["Envoy Gateway"]
-                Rollouts["Argo Rollouts"]
-                ArgoCD["Argo CD"]
-                Vault["HashiCorp Vault + VSO"]
-            end
-            
-            subgraph AppTier ["App Tier (devops-demo Namespace)"]
-                FE["frontend<br>(React + Nginx)"]:::app
-                BE_Active["backend-active<br>(Node.js - Blue)"]:::app
-                BE_Preview["backend-preview<br>(Node.js - Green)"]:::app
-            end
-            
-            subgraph Obs ["Observability Stack (monitoring Namespace)"]
-                Prom["Prometheus"]:::observability
-                Alloy["Grafana Alloy"]:::observability
-                Loki["Loki"]:::observability
-                Tempo["Tempo"]:::observability
-                Grafana["Grafana"]:::observability
-                Alertmanager["Alertmanager"]:::observability
-            end
-        end
-    end
-
-    Discord["Discord Channel"]:::ext
-
-    %% Traffic Flow
-    Internet -->|HTTP/HTTPS| EIP
-    EIP --> ELB
-    ELB -->|NodePort: 30080/30443| EG
-    
-    EG -->|HTTPRoute: /app| FE
-    EG -->|HTTPRoute: /api| BE_Active
-    EG -->|HTTPRoute: /api/preview| BE_Preview
-
-    %% Secrets
-    Vault -.->|Syncs K8s Secrets| BE_Active
-    Vault -.->|Syncs K8s Secrets| BE_Preview
-
-    %% GitOps
-    ArgoCD -->|Reconciles manifests| FE
-    ArgoCD -->|Reconciles manifests| Rollouts
-    Rollouts -->|Manages Blue/Green| BE_Active
-    Rollouts -->|Manages Blue/Green| BE_Preview
-
-    %% Observability Data Flows
-    Prom -->|Scrapes /metrics| BE_Active
-    Prom -->|Scrapes /metrics| BE_Preview
-    Alloy -->|Collects Logs| Loki
-    BE_Active -.->|Sends traces (OTLP)| Tempo
-    BE_Preview -.->|Sends traces (OTLP)| Tempo
-    
-    %% Alerting
-    Prom -->|Trigger Alerts| Alertmanager
-    Alertmanager -->|Discord Webhook| Discord
-
-    %% Dashboards
-    Grafana -->|Queries| Prom
-    Grafana -->|Queries| Loki
-    Grafana -->|Queries| Tempo
 ```
+   ╔══════════════════════════════════════════════════════════════════════════════════════════════╗
+   ║                              🌐 Internet / Users                                              ║
+   ╚═══════════════════════════════════════╤══════════════════════════════════════════════════════╝
+                                           │ HTTP/HTTPS
+                                           ▼
+   ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+   │  Huawei Cloud VPC                                                                            │
+   │                                                                                              │
+   │    ┌──────────────┐         ┌──────────────────────────┐                                     │
+   │    │  Public EIP  │ ──────▶ │  Dedicated ELB           │                                     │
+   │    │              │         │  (L7 Load Balancer)      │                                     │
+   │    └──────────────┘         └────────────┬─────────────┘                                     │
+   │                                          │ NodePort: 30080 / 30443                           │
+   │                                          ▼                                                   │
+   │    ╔══════════════════════════════════════════════════════════════════════════════════╗      │
+   │    ║  CCE Cluster (Kubernetes 1.33)                                                    ║      │
+   │    ║                                                                                  ║      │
+   │    ║   ┌──── Platform Tier ──────────────────────────────────────────────────────┐    ║      │
+   │    ║   │                                                                          │    ║      │
+   │    ║   │   ┌──────────────┐  ┌──────────────┐  ┌──────────┐  ┌──────────────┐    │    ║      │
+   │    ║   │   │ Envoy Gateway│  │Argo Rollouts │  │ Argo CD  │  │ Vault + VSO  │    │    ║      │
+   │    ║   │   └──────┬───────┘  └──────┬───────┘  └────┬─────┘  └──────┬───────┘    │    ║      │
+   │    ║   └──────────┼─────────────────┼───────────────┼───────────────┼────────────┘    ║      │
+   │    ║              │                 │               │               │                 ║      │
+   │    ║              │ HTTPRoute       │ Manages       │ Reconciles    │ Syncs K8s       ║      │
+   │    ║              │                 │ Blue/Green    │ manifests     │ Secrets         ║      │
+   │    ║              │                 │               │               │                 ║      │
+   │    ║              │                 │       ┌───────┘               │                 ║      │
+   │    ║              ▼                 ▼       ▼                       │                 ║      │
+   │    ║   ┌──── App Tier (ns: devops-demo) ──────────────────────────────────────────┐  ║      │
+   │    ║   │                                                            │             │  ║      │
+   │    ║   │   /app    ┌─────────────────────┐                          │             │  ║      │
+   │    ║   │  ───────▶ │  frontend           │ ◀────────────────────────┘             │  ║      │
+   │    ║   │           │  (React + Nginx)    │ ◀──── reconcile from ArgoCD            │  ║      │
+   │    ║   │           └─────────────────────┘                                        │  ║      │
+   │    ║   │                                                                          │  ║      │
+   │    ║   │   /api    ┌─────────────────────────┐    ┌──────────────────────────┐    │  ║      │
+   │    ║   │  ───────▶ │  backend-active         │    │  backend-preview         │    │  ║      │
+   │    ║   │           │  (Node.js — Blue)       │    │  (Node.js — Green)       │    │  ║      │
+   │    ║   │           │                         │    │                          │    │  ║      │
+   │    ║   │           │  managed by Rollouts ▲  │    │  managed by Rollouts  ▲  │    │  ║      │
+   │    ║   │           │  Vault Secret  ◀ - -  │  │    │  Vault Secret  ◀- - - │  │    │  ║      │
+   │    ║   │           └─────────────────────────┘    └──────────────────────────┘    │  ║      │
+   │    ║   │                  ▲                              ▲                        │  ║      │
+   │    ║   │                  │ /api/preview ◀───────────────┘                        │  ║      │
+   │    ║   └──────────────────┼─────────┬─────────────────────┬────────────────────────┘  ║      │
+   │    ║                      │         │                     │                            ║      │
+   │    ║                      │         │ scrape /metrics     │ traces (OTLP)              ║      │
+   │    ║                      │         │                     │                            ║      │
+   │    ║   ┌──── Observability Stack (ns: monitoring) ────────┼────────────────────────┐  ║      │
+   │    ║   │                            │                     │                        │  ║      │
+   │    ║   │     ┌──────────────┐       │           ┌─────────▼─────┐                  │  ║      │
+   │    ║   │     │ Prometheus   │ ◀─────┘           │   Tempo       │                  │  ║      │
+   │    ║   │     └──────┬───────┘                   │  (traces DB)  │                  │  ║      │
+   │    ║   │            │                           └───────▲───────┘                  │  ║      │
+   │    ║   │            │ trigger alerts                    │                          │  ║      │
+   │    ║   │            ▼                                   │                          │  ║      │
+   │    ║   │     ┌──────────────┐                  ┌────────┴───────┐                  │  ║      │
+   │    ║   │     │ Alertmanager │                  │  Grafana Alloy │── collect logs   │  ║      │
+   │    ║   │     └──────┬───────┘                  │  (collector)   │                  │  ║      │
+   │    ║   │            │                          └────────┬───────┘                  │  ║      │
+   │    ║   │            │                                   │                          │  ║      │
+   │    ║   │            │                                   ▼                          │  ║      │
+   │    ║   │            │                          ┌──────────────┐                    │  ║      │
+   │    ║   │            │                          │     Loki     │                    │  ║      │
+   │    ║   │            │                          │  (logs DB)   │                    │  ║      │
+   │    ║   │            │                          └──────▲───────┘                    │  ║      │
+   │    ║   │            │                                 │                            │  ║      │
+   │    ║   │            │                                 │                            │  ║      │
+   │    ║   │            │       ┌──────────────┐          │                            │  ║      │
+   │    ║   │            │       │   Grafana    │──────────┘ queries Loki               │  ║      │
+   │    ║   │            │       │ (dashboards) │── queries Prom                        │  ║      │
+   │    ║   │            │       └──────────────┘── queries Tempo                       │  ║      │
+   │    ║   │            │                                                              │  ║      │
+   │    ║   └────────────┼──────────────────────────────────────────────────────────────┘  ║      │
+   │    ║                │                                                                 ║      │
+   │    ╚════════════════│═════════════════════════════════════════════════════════════════╝      │
+   │                     │                                                                        │
+   └─────────────────────┼────────────────────────────────────────────────────────────────────────┘
+                         │ Discord Webhook
+                         ▼
+                  ┌──────────────────┐
+                  │ Discord Channel  │
+                  └──────────────────┘
+```
+
+**Legend**
+- `────▶` Solid: active traffic / control flow (HTTP, sync, manage)
+- `- - ▶` Dashed: read/reference (secrets, metrics scrape, traces)
+- `╔══╗` External boundary (VPC, Cluster)
+- `┌──┐` Component box / logical group
+
+**Flow types in the system**
+- **User traffic:** Internet → EIP → ELB → Envoy Gateway → `/app` (frontend), `/api` (backend-active), `/api/preview` (backend-preview)
+- **GitOps:** Argo CD reconciles manifests; Argo Rollouts manages Blue/Green of backend
+- **Secrets:** Vault + VSO syncs to K8s Secrets used by backend pods
+- **Observability:** Prometheus scrapes metrics; Alloy collects logs to Loki; pods send OTLP traces to Tempo; Grafana queries all three
+- **Alerting:** Prometheus rules fire → Alertmanager → Discord webhook
 
 Three CCE clusters (dev / staging / prod) on Huawei Cloud, each running an
 identical workload stack:
@@ -336,6 +358,16 @@ Two Services exist permanently:
 
 Promote with `kubectl argo rollouts promote backend -n devops-demo` (or the
 button in Argo Rollouts dashboard). Rollback = `argo rollouts undo`.
+
+![Argo Rollouts dashboard — backend blue/green](docs/images/05-argo-rollouts-ui.png)
+
+ภาพ Argo Rollouts UI ของ backend rollout — เห็น:
+- **Strategy: BlueGreen**
+- **Revision 2** (current): `devops-backend:1f1ad52c` — marked both `stable` + `active`
+  (ReplicaSet `backend-69d9fc89bb`, pods healthy)
+- **Revision 1** (previous): `devops-backend:blue-dev` — scaled to 0 (No Pods!),
+  but ReplicaSet `backend-566f85cb59` คงอยู่เพื่อ instant rollback (กดปุ่ม `Rollback`)
+- Action buttons: `Restart`, `Retry`, `Abort`, `Promote`, `PromoteFull`
 
 ### Traffic routing (Gateway API + Envoy Gateway)
 
