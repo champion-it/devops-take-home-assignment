@@ -1,0 +1,95 @@
+# Prod overrides for argocd-image-updater 1.2.1 (appVersion v1.2.0).
+# Installed in the `argocd` namespace alongside Argo CD itself.
+
+replicaCount: 1   # upstream recommends 1; coordination is not yet leader-elected
+
+image:
+  repository: quay.io/argoprojlabs/argocd-image-updater
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Conservative poll, lower concurrency.
+extraArgs:
+  - --interval
+  - 5m
+  - --max-concurrency
+  - "3"
+  - --health-port
+  - "8081"
+
+extraEnv:
+  # Webhook TLS stays on in prod (default for 1.2+). Provide cert via
+  # certificateSecret if exposing the webhook endpoint externally.
+  - name: DISABLE_TLS
+    value: "false"
+
+config:
+  log.level: info
+  kube.events: true
+  git.user: argocd-image-updater
+  git.email: argocd-image-updater@dwl.internal
+  git.commit-message-template: |
+    chore(prod): bump {{ .AppName }} to {{ range .AppChanges }}{{ .Image }}:{{ .NewTag }} {{ end }}
+
+    Signed-off-by: argocd-image-updater <argocd-image-updater@dwl.internal>
+  git.commit-sign-off: true
+
+  registries:
+    - name: Huawei SWR (ap-southeast-2)
+      api_url: https://swr.ap-southeast-2.myhuaweicloud.com
+      prefix: swr.ap-southeast-2.myhuaweicloud.com
+      ping: yes
+      insecure: no
+      credentials: pullsecret:argocd/swr-pull-secret
+      credsexpire: 12h
+    - name: Docker Hub
+      api_url: https://registry-1.docker.io
+      prefix: docker.io
+      ping: yes
+      defaultns: library
+
+rbac:
+  enabled: true
+createClusterRoles: true
+
+serviceAccount:
+  create: true
+  name: argocd-image-updater
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+    interval: 30s
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8443"
+
+# Run on stable node pool if available.
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-image-updater
+
+service:
+  enabled: false
+ingress:
+  enabled: false

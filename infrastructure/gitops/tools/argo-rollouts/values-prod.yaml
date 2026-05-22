@@ -1,0 +1,75 @@
+# Prod overrides for argo-rollouts (merged on top of values.yaml).
+# HA controller, dashboard hardened, metrics + ServiceMonitor on.
+
+installCRDs: true
+keepCRDs: true
+clusterInstall: true
+createClusterAggregateRoles: true
+
+controller:
+  replicas: 2
+  logging:
+    level: info
+    format: json
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+  pdb:
+    enabled: true
+    minAvailable: 1
+  # Spread controller pods across zones for resilience.
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: argo-rollouts
+
+dashboard:
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+  # Restrict dashboard read-only (no rollback/promote actions from UI).
+  readonly: true
+
+# Notification controller — wire up Slack via existing secret in argo-rollouts ns.
+notifications:
+  notifiers:
+    service.slack: |
+      token: $slack-token
+  templates:
+    template.rollout-aborted: |
+      message: |
+        Rollout {{.rollout.metadata.name}} aborted in {{.rollout.metadata.namespace}}.
+  triggers:
+    trigger.on-rollout-aborted: |
+      - when: rollout.status.phase in ['Degraded']
+        send: [rollout-aborted]
+  secret:
+    create: false
+    name: argo-rollouts-notification-secret

@@ -1,0 +1,76 @@
+# Dev overrides for argocd-image-updater 1.2.1 (appVersion v1.2.0).
+# Installed in the `argocd` namespace alongside Argo CD itself.
+
+replicaCount: 1
+
+image:
+  repository: quay.io/argoprojlabs/argocd-image-updater
+  tag: ""   # uses Chart.appVersion (v1.2.0)
+  pullPolicy: IfNotPresent
+
+# Run more aggressively in dev — short poll interval, verbose logs.
+extraArgs:
+  - --interval
+  - 1m
+  - --max-concurrency
+  - "5"
+  - --health-port
+  - "8081"
+
+extraEnv:
+  # Webhook TLS off — internal-only in dev.
+  - name: DISABLE_TLS
+    value: "true"
+
+config:
+  log.level: debug
+  kube.events: true
+  git.user: argocd-image-updater
+  git.email: argocd-image-updater@dwl.internal
+  git.commit-message-template: |
+    chore(dev): bump {{ .AppName }} to {{ range .AppChanges }}{{ .Image }}:{{ .NewTag }} {{ end }}
+
+  # Huawei Cloud SWR registry used by backend rollout. Credentials live in a
+  # pre-created Secret (`swr-pull-secret`) in the `argocd` namespace.
+  registries:
+    - name: Huawei SWR (ap-southeast-2)
+      api_url: https://swr.ap-southeast-2.myhuaweicloud.com
+      prefix: swr.ap-southeast-2.myhuaweicloud.com
+      ping: yes
+      insecure: no
+      credentials: pullsecret:argocd/swr-pull-secret
+      credsexpire: 12h
+    - name: Docker Hub
+      api_url: https://registry-1.docker.io
+      prefix: docker.io
+      ping: yes
+      defaultns: library
+
+rbac:
+  enabled: true
+createClusterRoles: true
+
+serviceAccount:
+  create: true
+  name: argocd-image-updater
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+
+# Git write-back credentials. The Secret `git-creds` must exist in the argocd
+# namespace and match the gitops repo (`gitops-repo`). Image Updater reads it
+# via the `argocd.argoproj.io/write-back-method` annotation on Applications.
+service:
+  enabled: false
+ingress:
+  enabled: false

@@ -1,0 +1,45 @@
+# Dev overrides for argo-rollouts (merged on top of values.yaml).
+# Single replica, lower resource floor, verbose logs.
+
+installCRDs: true
+keepCRDs: true
+clusterInstall: true
+createClusterAggregateRoles: true
+
+controller:
+  replicas: 1
+  logging:
+    level: debug
+    format: text
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+  pdb:
+    enabled: false
+
+dashboard:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  service:
+    type: ClusterIP
+
+notifications:
+  # Disabled in dev — wire up Slack/etc. in prod only.
+  notifiers: {}
+  templates: {}
+  triggers: {}

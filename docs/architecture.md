@@ -11,6 +11,84 @@ to evidence captured from the live deployment.
 
 ![High-level architecture](images/01-architecture-overview.png)
 
+```mermaid
+graph TD
+    classDef default fill:#1e293b,stroke:#38bdf8,stroke-width:1px,color:#e2e8f0;
+    classDef vpc fill:#0f172a,stroke:#334155,stroke-dasharray: 5 5,color:#94a3b8;
+    classDef cluster fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#c7d2fe;
+    classDef ext fill:#0c0a09,stroke:#78716c,stroke-width:1px,color:#e7e5e4;
+    classDef app fill:#064e3b,stroke:#34d399,stroke-width:1px,color:#e2e8f0;
+    classDef observability fill:#312e81,stroke:#a5b4fc,stroke-dasharray: 3 3,color:#e2e8f0;
+
+    Internet[("Internet / Users")]:::ext
+    
+    subgraph VPC ["Huawei Cloud VPC"]
+        EIP["Public EIP"]
+        ELB["Dedicated ELB<br>(L7 Load Balancer)"]
+        
+        subgraph CCE ["CCE Cluster (Kubernetes 1.33)"]
+            subgraph Platform ["Platform Tier"]
+                EG["Envoy Gateway"]
+                Rollouts["Argo Rollouts"]
+                ArgoCD["Argo CD"]
+                Vault["HashiCorp Vault + VSO"]
+            end
+            
+            subgraph AppTier ["App Tier (devops-demo Namespace)"]
+                FE["frontend<br>(React + Nginx)"]:::app
+                BE_Active["backend-active<br>(Node.js - Blue)"]:::app
+                BE_Preview["backend-preview<br>(Node.js - Green)"]:::app
+            end
+            
+            subgraph Obs ["Observability Stack (monitoring Namespace)"]
+                Prom["Prometheus"]:::observability
+                Alloy["Grafana Alloy"]:::observability
+                Loki["Loki"]:::observability
+                Tempo["Tempo"]:::observability
+                Grafana["Grafana"]:::observability
+                Alertmanager["Alertmanager"]:::observability
+            end
+        end
+    end
+
+    Discord["Discord Channel"]:::ext
+
+    %% Traffic Flow
+    Internet -->|HTTP/HTTPS| EIP
+    EIP --> ELB
+    ELB -->|NodePort: 30080/30443| EG
+    
+    EG -->|HTTPRoute: /app| FE
+    EG -->|HTTPRoute: /api| BE_Active
+    EG -->|HTTPRoute: /api/preview| BE_Preview
+
+    %% Secrets
+    Vault -.->|Syncs K8s Secrets| BE_Active
+    Vault -.->|Syncs K8s Secrets| BE_Preview
+
+    %% GitOps
+    ArgoCD -->|Reconciles manifests| FE
+    ArgoCD -->|Reconciles manifests| Rollouts
+    Rollouts -->|Manages Blue/Green| BE_Active
+    Rollouts -->|Manages Blue/Green| BE_Preview
+
+    %% Observability Data Flows
+    Prom -->|Scrapes /metrics| BE_Active
+    Prom -->|Scrapes /metrics| BE_Preview
+    Alloy -->|Collects Logs| Loki
+    BE_Active -.->|Sends traces (OTLP)| Tempo
+    BE_Preview -.->|Sends traces (OTLP)| Tempo
+    
+    %% Alerting
+    Prom -->|Trigger Alerts| Alertmanager
+    Alertmanager -->|Discord Webhook| Discord
+
+    %% Dashboards
+    Grafana -->|Queries| Prom
+    Grafana -->|Queries| Loki
+    Grafana -->|Queries| Tempo
+```
+
 Three CCE clusters (dev / staging / prod) on Huawei Cloud, each running an
 identical workload stack:
 
